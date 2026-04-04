@@ -1,0 +1,13 @@
+{
+  "name": "blah2-recorder",
+  "type": "module",
+  "version": "1.0.0",
+  "description": "Records blah2 delay-Doppler maps and ADS-B truth for ML training",
+  "main": "recorder.js",
+  "scripts": {
+    "start": "node recorder.js"
+  },
+  "dependencies": {
+    "node-fetch": "^3.3.2"
+  }
+}

@@ -1,0 +1,18 @@
+# blah2-recorder configuration
+# The recorder reads blah2's config.yml directly to auto-detect
+# SDR type, frequency, geometry, and adsb2dd settings.
+
+# Path to blah2's config.yml on this machine
+blah2_config_path: "/opt/blah2/config/config.yml"
+
+# Override blah2 API URL if needed (default: built from blah2 config network section)
+# blah2_api_url: "http://localhost:3000"
+
+# Override adsb2dd URL if needed (default: built from blah2 config truth section)
+# For the dockerized adsb2dd on the same machine, this is typically localhost:49155
+adsb2dd_url: "http://localhost:49155"
+
+# Recording settings
+output_dir: "/opt/blah2-training-data"
+session_rotate_hours: 12
+poll_interval_ms: 750

@@ -4,10 +4,10 @@ Convert ADSB data to delay-Doppler truth - see a live instance at [http://adsb2d
 
 ## Features
 
-- Provides an API to input receiver/transmitter coordinates, radar center frequency and [tar1090](https://github.com/wiedehopf/tar1090) server.
-- A web front-end calculator is provided to generate a correct API endpoint.
+- Provides an API to convert ADS-B data to delay-Doppler truth using receiver/transmitter coordinates, radar center frequency and a [tar1090](https://github.com/wiedehopf/tar1090) server.
 - Outputs JSON data with a delay in km and Doppler in Hz.
 - Use the JSON output to map truth onto a delay-Doppler map, for example in [blah2](http://github.com/30hours/blah2).
+- Health check endpoint at `/api/status` for quick validation.
 
 ## Usage
 
@@ -16,12 +16,12 @@ Convert ADSB data to delay-Doppler truth - see a live instance at [http://adsb2d
 - Run the docker compose command.
 
 ```
-sudo git clone http://github.com/30hours/adsb2dd /opt/adsb2dd
+git clone http://github.com/30hours/adsb2dd /opt/adsb2dd
 cd /opt/adsb2dd
 sudo docker compose up -d
 ```
 
-The API front-end is available at [http://localhost:49155](http://localhost:49155).
+The API is available at [http://localhost:49155/api/dd](http://localhost:49155/api/dd). Check status at [http://localhost:49155/api/status](http://localhost:49155/api/status).
 
 ## Method of Operation
 

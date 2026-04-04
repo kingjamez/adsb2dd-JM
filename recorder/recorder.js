@@ -93,16 +93,13 @@ const apiPort = network.ports?.api || 3000;
 const sdrType = (capture.device?.type || 'unknown').toLowerCase()
   .replace('rspduo', 'rspduo').replace('usrp', 'b210')
   .replace('hackrf', 'hackrf').replace('kraken', 'cr8');
-const fs_hz = capture.fs || 2000000;
-const fc_hz = capture.fc || 0;
-const cpi = process_cfg.data?.cpi || 0.75;
+const fs_hz = Number(capture.fs) || 2000000;
+const fc_hz = Number(capture.fc) || 0;
+const cpi = Number(process_cfg.data?.cpi) || 0.75;
 
-// Illuminator type from frequency
-let illuminator = 'unknown';
-if (fc_hz > 170000000 && fc_hz < 230000000) illuminator = 'dtv';
-else if (fc_hz > 470000000 && fc_hz < 700000000) illuminator = 'dtv';
-else if (fc_hz > 87000000 && fc_hz < 108000000) illuminator = 'fm';
-else if (fc_hz > 174000000 && fc_hz < 216000000) illuminator = 'dtv';
+// Illuminator type: FM if 88-108 MHz, otherwise DTV
+const fc_mhz = fc_hz / 1000000;
+const illuminator = (fc_mhz >= 88 && fc_mhz <= 108) ? 'fm' : 'dtv';
 
 const fsLabel = fs_hz >= 1000000 ? `${fs_hz / 1000000}mhz` : `${fs_hz / 1000}khz`;
 const SOURCE_LABEL = `${illuminator}_${sdrType}_${fsLabel}`;

@@ -97,8 +97,8 @@ app.get('/api/status', (req, res) => {
   });
 });
 
-app.listen(port, () => {
-  console.log(`Server is running at http://localhost:${port}`);
+app.listen(port, '0.0.0.0', () => {
+  console.log(`Server is running on 0.0.0.0:${port}`);
 });
 
 /// @brief Main event loop to update dict data.

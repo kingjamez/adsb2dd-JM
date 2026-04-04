@@ -39,9 +39,19 @@ function parseBlah2Config(text) {
   const config = {};
   let section = null;
   let subsection = null;
+  // Detect indent unit from first indented line (tabs, 2-space, 4-space, etc.)
+  let indentUnit = 0;
   for (const line of text.split('\n')) {
     if (!line.trim() || line.trim().startsWith('#')) continue;
-    const indent = line.search(/\S/);
+    const spaces = line.search(/\S/);
+    if (spaces > 0) { indentUnit = spaces; break; }
+  }
+  if (indentUnit === 0) indentUnit = 2; // fallback
+
+  for (const line of text.split('\n')) {
+    if (!line.trim() || line.trim().startsWith('#')) continue;
+    const rawIndent = line.search(/\S/);
+    const level = rawIndent === 0 ? 0 : Math.round(rawIndent / indentUnit);
     const match = line.trim().match(/^([\w_]+):\s*(.*)$/);
     if (!match) continue;
     let [, key, value] = match;
@@ -53,11 +63,11 @@ function parseBlah2Config(text) {
     else if (/^-?\d+$/.test(parsed)) parsed = parseInt(parsed);
     else if (/^-?\d+\.\d+$/.test(parsed)) parsed = parseFloat(parsed);
     else if (parsed.startsWith('[')) parsed = parsed;
-    if (indent === 0) {
+    if (level === 0) {
       section = key; subsection = null;
       if (parsed === null) config[section] = {};
       else config[section] = parsed;
-    } else if (indent === 2 && section) {
+    } else if (level === 1 && section) {
       subsection = null;
       if (parsed === null) {
         subsection = key;
@@ -68,10 +78,10 @@ function parseBlah2Config(text) {
         config[section][key] = parsed;
         subsection = null;
       }
-    } else if (indent === 4 && section && subsection) {
+    } else if (level >= 2 && section && subsection) {
       if (!config[section][subsection]) config[section][subsection] = {};
       config[section][subsection][key] = parsed;
-    } else if (indent === 4 && section) {
+    } else if (level >= 2 && section) {
       config[section][key] = parsed;
     }
   }
@@ -123,9 +133,10 @@ async function probeAdsb2dd(url, timeoutMs = 2000) {
   try {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
-    const res = await fetch(`${url}/api/status`, { signal: controller.signal });
+    // Just check if the server responds at all (even 404 means it's running)
+    await fetch(url, { signal: controller.signal });
     clearTimeout(timer);
-    return res.ok;
+    return true;
   } catch { return false; }
 }
 

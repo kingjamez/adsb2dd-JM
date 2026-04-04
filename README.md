@@ -11,6 +11,38 @@ Convert ADSB data to delay-Doppler truth - see a live instance at [http://adsb2d
 
 ## Usage
 
+### Bare-Metal (no Docker)
+
+- Install [Node.js](https://nodejs.org/) 16+ on the host machine.
+- Clone this repository to some directory.
+- Run the startup script.
+
+```
+git clone http://github.com/30hours/adsb2dd /opt/adsb2dd
+cd /opt/adsb2dd
+./start.sh
+```
+
+The server defaults to port 3000. You can set a custom port by passing it as an argument or via the `PORT` environment variable:
+
+```
+./start.sh 8080
+# or
+PORT=8080 ./start.sh
+```
+
+Alternatively, install dependencies and run manually:
+
+```
+cd src
+npm install
+PORT=3000 node server.js
+```
+
+The API front-end is available at [http://localhost:3000](http://localhost:3000).
+
+### Docker
+
 - Install docker and docker-compose on the host machine.
 - Clone this repository to some directory.
 - Run the docker compose command.

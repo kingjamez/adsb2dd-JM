@@ -124,7 +124,8 @@ const SOURCE_LABEL = `${illuminator}_${sdrType}_${fsLabel}`;
 // URLs
 const BLAH2_URL = recorderConfig.blah2_api_url || `http://localhost:${apiPort}`;
 
-// adsb2dd URL: prefer recorder config override, else build from blah2 truth config
+// adsb2dd URL: prefer recorder config override, else build from blah2 truth config.
+// If the host resolves to localhost, auto-detect docker (49155) vs bare-metal (3000).
 let ADSB2DD_BASE;
 if (recorderConfig.adsb2dd_url) {
   ADSB2DD_BASE = recorderConfig.adsb2dd_url;
@@ -134,19 +135,56 @@ if (recorderConfig.adsb2dd_url) {
   ADSB2DD_BASE = null;
 }
 
-// Build the full adsb2dd query URL from blah2 geometry
-let adsb2ddQueryUrl = null;
-if (ADSB2DD_BASE && truth.enabled && location.rx && location.tx) {
-  const rx = location.rx;
-  const tx = location.tx;
-  const fcMhz = fc_hz / 1000000;
-  const tar1090Server = truth.tar1090 || 'localhost';
-  adsb2ddQueryUrl = `${ADSB2DD_BASE}/api/dd` +
-    `?rx=${rx.latitude},${rx.longitude},${rx.altitude}` +
-    `&tx=${tx.latitude},${tx.longitude},${tx.altitude}` +
-    `&fc=${fcMhz}` +
-    `&server=http://${tar1090Server}`;
+async function probeAdsb2dd(url, timeoutMs = 2000) {
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    const res = await fetch(`${url}/api/status`, { signal: controller.signal });
+    clearTimeout(timer);
+    return res.ok;
+  } catch { return false; }
 }
+
+async function autoDetectAdsb2dd() {
+  if (recorderConfig.adsb2dd_url) return; // explicit override, skip detection
+  const DOCKER_PORT = 49155;  // docker & docker-slim host-mapped port
+  const BARE_METAL_PORT = 3000; // bare-metal default
+  const candidates = [
+    `http://localhost:${DOCKER_PORT}`,
+    `http://localhost:${BARE_METAL_PORT}`
+  ];
+  for (const url of candidates) {
+    if (await probeAdsb2dd(url)) {
+      console.log(`  auto-detect:  found adsb2dd at ${url}`);
+      ADSB2DD_BASE = url;
+      return;
+    }
+  }
+  // If blah2 config had a remote host, keep that as fallback (already set above)
+  if (ADSB2DD_BASE) {
+    console.log(`  auto-detect:  no local adsb2dd, using blah2 config: ${ADSB2DD_BASE}`);
+  }
+}
+
+// Build the full adsb2dd query URL from blah2 geometry
+// This is rebuilt after auto-detection in main()
+let adsb2ddQueryUrl = null;
+function buildAdsb2ddQueryUrl() {
+  if (ADSB2DD_BASE && truth.enabled && location.rx && location.tx) {
+    const rx = location.rx;
+    const tx = location.tx;
+    const fcMhz = fc_hz / 1000000;
+    const tar1090Server = truth.tar1090 || 'localhost';
+    adsb2ddQueryUrl = `${ADSB2DD_BASE}/api/dd` +
+      `?rx=${rx.latitude},${rx.longitude},${rx.altitude}` +
+      `&tx=${tx.latitude},${tx.longitude},${tx.altitude}` +
+      `&fc=${fcMhz}` +
+      `&server=http://${tar1090Server}`;
+  } else {
+    adsb2ddQueryUrl = null;
+  }
+}
+buildAdsb2ddQueryUrl();
 
 const OUTPUT_DIR = recorderConfig.output_dir || '/opt/blah2-training-data';
 const ROTATE_HOURS = recorderConfig.session_rotate_hours || 12;
@@ -294,6 +332,14 @@ async function main() {
   console.log('blah2-recorder starting');
   console.log(`  blah2 config: ${blah2ConfigPath}`);
   console.log(`  blah2 API:    ${BLAH2_URL}`);
+
+  // Auto-detect adsb2dd if no explicit URL configured
+  if (!recorderConfig.adsb2dd_url) {
+    console.log('  adsb2dd:      auto-detecting...');
+    await autoDetectAdsb2dd();
+    buildAdsb2ddQueryUrl();
+  }
+
   console.log(`  adsb2dd:      ${ADSB2DD_BASE || 'disabled'}`);
   console.log(`  source:       ${SOURCE_LABEL}`);
   console.log(`  illuminator:  ${illuminator} @ ${fc_hz / 1000000} MHz`);

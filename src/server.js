@@ -1,14 +1,12 @@
 import express from 'express';
-import cors from 'cors';
-import fetch from 'node-fetch';
 
 import {checkTar1090, getTar1090} from './node/tar1090.js';
 import {lla2ecef, norm, ft2m} from './node/geometry.js';
 import {isValidNumber} from './node/validate.js';
 
 const app = express();
-app.use(cors());
-const port = 80;
+const port = process.env.PORT || 3000;
+const startTime = Date.now();
 
 // constants
 var dict = {};
@@ -18,8 +16,6 @@ const tDelete = 30;
 const tDeletePlane = 5;
 const nMaxDelayArray = 10;
 const nDopplerSmooth = 10;
-
-app.use(express.static('public'));
 
 app.get('/api/dd', async (req, res) => {
 
@@ -76,8 +72,33 @@ app.get('/api/dd', async (req, res) => {
 
 });
 
-app.listen(port, () => {
-  console.log(`Server is running at http://localhost:${port}`);
+// health check endpoint for human validation
+app.get('/api/status', (req, res) => {
+  const configs = Object.entries(dict).map(([key, value]) => {
+    const aircraft = Object.keys(value['out'] || {});
+    return {
+      query: key,
+      server: value['server'],
+      fc: value['fc'],
+      rx: [value['rxLat'], value['rxLon'], value['rxAlt']],
+      tx: [value['txLat'], value['txLon'], value['txAlt']],
+      aircraft_count: aircraft.length,
+      last_api_call: value['timestamp'],
+      sample_aircraft: aircraft.length > 0
+        ? { hex: aircraft[0], ...value['out'][aircraft[0]] }
+        : null
+    };
+  });
+
+  res.json({
+    uptime_seconds: Math.floor((Date.now() - startTime) / 1000),
+    active_configs: configs.length,
+    configs: configs
+  });
+});
+
+app.listen(port, '::', () => {
+  console.log(`Server is running on port ${port}`);
 });
 
 /// @brief Main event loop to update dict data.

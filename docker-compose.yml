@@ -1,5 +1,3 @@
-version: '3'
-
 services:
 
   adsb2dd:
@@ -7,6 +5,5 @@ services:
     build: .
     image: adsb2dd
     ports:
-      - 49155:80
-    network_mode: bridge
+      - 3000:3000
     container_name: adsb2dd

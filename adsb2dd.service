@@ -1,0 +1,16 @@
+[Unit]
+Description=adsb2dd - ADS-B to delay-Doppler server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/opt/adsb2dd-JM/src
+ExecStart=/usr/bin/node /opt/adsb2dd-JM/src/server.js
+Restart=on-failure
+RestartSec=5
+Environment=PORT=3000
+
+[Install]
+WantedBy=multi-user.target

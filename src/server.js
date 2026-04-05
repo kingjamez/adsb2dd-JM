@@ -5,7 +5,7 @@ import {lla2ecef, norm, ft2m} from './node/geometry.js';
 import {isValidNumber} from './node/validate.js';
 
 const app = express();
-const port = 80;
+const port = process.env.PORT || 3000;
 const startTime = Date.now();
 
 // constants

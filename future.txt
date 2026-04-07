@@ -1,0 +1,142 @@
+Future Filtered Mode
+
+Keep current /api/dd unchanged.
+
+Add optional query parameters:
+
+- delay_min
+- delay_max
+- doppler_min
+- doppler_max
+- doppler_ready_only
+- fields
+
+Example:
+
+GET /api/dd?rx=39.0792,-77.55252,50&tx=38.999833,-77.0572,750&fc=101.1&server=http://100.65.214.53/tar1090&delay_min=-10&delay_max=100&doppler_min=-100&doppler_max=100&doppler_ready_only=true&fields=timestamp,flight,delay,doppler
+
+Semantics
+
+Base behavior:
+- compute the same full internal state as today
+- filtering applies only to the response body
+- cache/runtime identity should remain based only on core config:
+  - server
+  - rx
+  - tx
+  - fc
+- response filters must not create separate processing loops
+
+Filter rules:
+- doppler_ready_only=true
+  - omit aircraft without a valid doppler
+- delay_min / delay_max
+  - include aircraft only if delay exists and is within range
+- doppler_min / doppler_max
+  - include aircraft only if doppler exists and is within range
+- if a bound is omitted, do not filter on that side
+- filtering should happen after Doppler gating
+
+fields:
+- comma-separated allowlist
+- allowed:
+  - timestamp
+  - flight
+  - delay
+  - doppler
+- hex remains the object key and is always present implicitly
+- if fields omitted, return current default shape
+
+Recommended default for Silentsky:
+- doppler_ready_only=true
+- bounds from Silentsky config
+- fields=timestamp,flight,delay,doppler
+
+Response Shape
+
+Keep hex-keyed object:
+
+{
+  "a0e6c6": {
+    "timestamp": 1775590465.04,
+    "flight": "UAL2081",
+    "delay": 25.75403,
+    "doppler": 71.65152
+  },
+  "ab3133": {
+    "timestamp": 1775590465.532,
+    "flight": "DAL403",
+    "delay": 12.70982,
+    "doppler": 70.38606
+  }
+}
+
+Optional future metadata wrapper if needed later, but not required now:
+
+{
+  "meta": {
+    "filtered": true,
+    "doppler_ready_only": true,
+    "delay_min": -10,
+    "delay_max": 100,
+    "doppler_min": -100,
+    "doppler_max": 100,
+    "fields": ["timestamp", "flight", "delay", "doppler"],
+    "result_count": 2,
+    "updated_at": 1775590465
+  },
+  "aircraft": {
+    "...": {}
+  }
+}
+
+Do not add wrapper unless needed. Flat object is more backward-compatible.
+
+Validation
+
+- bounds must parse as finite numbers
+- delay_min <= delay_max if both set
+- doppler_min <= doppler_max if both set
+- doppler_ready_only accepts true|false
+- invalid fields value returns 400
+
+Important Design Rule
+
+Processing-state key must ignore response filters.
+
+Meaning:
+- this:
+  - rx
+  - tx
+  - fc
+  - server
+- determines the active computation
+
+But this:
+- delay_min
+- delay_max
+- doppler_min
+- doppler_max
+- doppler_ready_only
+- fields
+
+must only affect serialization/filtering of the already-computed output.
+
+That preserves support for multiple Silentsky nodes querying the same geometry with different display windows without multiplying compute loops.
+
+Silentsky Example
+
+Silentsky can build:
+
+/api/dd?...&delay_min=-10&delay_max=100&doppler_min=-100&doppler_max=100&doppler_ready_only=true&fields=timestamp,flight,delay,doppler
+
+using its own ambiguity config.
+
+When To Implement
+
+Only if:
+- payload size becomes noticeable
+- many aircraft are being discarded client-side
+- multiple nodes create enough traffic that response filtering is worth it
+
+Otherwise keep current behavior.

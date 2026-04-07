@@ -1,300 +1,178 @@
 import express from 'express';
+import path from 'node:path';
+import {fileURLToPath} from 'node:url';
 
-import {checkTar1090, getTar1090} from './node/tar1090.js';
-import {lla2ecef, norm, ft2m} from './node/geometry.js';
-import {isValidNumber} from './node/validate.js';
+import {parseStoredConfigInput} from './core/config.js';
+import {createRuntimeManager} from './runtime/manager.js';
+import {
+  createConfig,
+  deleteConfig,
+  getConfig,
+  listConfigs,
+  updateConfig
+} from './store/config-store.js';
 
 const app = express();
 const port = process.env.PORT || 3000;
 const startTime = Date.now();
+const runtimeManager = createRuntimeManager();
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const uiDir = path.join(__dirname, 'ui');
 
-// constants
-var dict = {};
-const tUpdate = 1000;
-const nApiMax = 10;
-const tDelete = 30;
-const tDeletePlane = 5;
-const nMaxDelayArray = 10;
-const nDopplerSmooth = 10;
+app.use(express.json());
+app.use(express.static(uiDir));
 
-app.get('/api/dd', async (req, res) => {
+app.get('/api/health', (req, res) => {
+  const status = runtimeManager.getStatus();
+  const hasErrors = status.configs.some((config) => config.last_error !== null);
 
-  console.log(req.originalUrl);
-
-  if (req.originalUrl in dict) {
-    dict[req.originalUrl]['timestamp'] = Date.now()/1000;
-    return res.json(dict[req.originalUrl]['out']);
-  }
-
-  // limit number of active requests
-  if (Object.keys(dict).length > nApiMax) {
-    return res.status(400).json({ error: 'Exceeded max API requests.' });
-  }
-    
-  // extract and validate parameters
-  const server = req.query.server;
-  const rxParams = req.query.rx.split(',').map(parseFloat);
-  const txParams = req.query.tx.split(',').map(parseFloat);
-  const fc = parseFloat(req.query.fc);
-  if (!server || !rxParams.every(isValidNumber) || !txParams.every(isValidNumber) || isNaN(fc)) {
-    return res.status(400).json({ error: 'Invalid parameters.' });
-  }
-  const [rxLat, rxLon, rxAlt] = rxParams;
-  const [txLat, txLon, txAlt] = txParams;
-  const apiUrl = server + '/data/aircraft.json';
-
-  // add new entry to dict
-  const isServerValid = await checkTar1090(apiUrl);
-  if (isServerValid) {
-    dict[req.originalUrl] = {};
-    dict[req.originalUrl]['rxLat'] = rxLat;
-    dict[req.originalUrl]['rxLon'] = rxLon;
-    dict[req.originalUrl]['rxAlt'] = rxAlt;
-    dict[req.originalUrl]['txLat'] = txLat;
-    dict[req.originalUrl]['txLon'] = txLon;
-    dict[req.originalUrl]['txAlt'] = txAlt;
-    dict[req.originalUrl]['fc'] = fc;
-    dict[req.originalUrl]['server'] = server;
-    dict[req.originalUrl]['apiUrl'] = apiUrl;
-    dict[req.originalUrl]['out'] = {};
-    dict[req.originalUrl]['timestamp'] = Date.now()/1000;
-    dict[req.originalUrl]['proc'] = {};
-    const ecefRx = lla2ecef(rxLat, rxLon, rxAlt);
-    const ecefTx = lla2ecef(txLat, txLon, txAlt);
-    dict[req.originalUrl]['ecefRx'] = ecefRx;
-    dict[req.originalUrl]['ecefTx'] = ecefTx;
-    dict[req.originalUrl]['dRxTx'] = norm([ecefRx.x - ecefTx.x, 
-      ecefRx.y - ecefTx.y, ecefRx.z - ecefTx.z]);
-    return res.json(dict[req.originalUrl]['out']);
-  } else {
-    return res.status(500).json({ error: 'Error checking tar1090 validity.' });
-  }
-
+  return res.json({
+    ok: true,
+    uptime_seconds: Math.floor((Date.now() - startTime) / 1000),
+    active_configs: status.active_configs,
+    has_errors: hasErrors
+  });
 });
 
-// health check endpoint for human validation
+app.get('/api/dd', async (req, res) => {
+  console.log(req.originalUrl);
+
+  const result = await runtimeManager.ensureConfig(req.query);
+  if (!result.ok) {
+    return res.status(result.status).json(result.body);
+  }
+
+  return res.json(result.state.out);
+});
+
 app.get('/api/status', (req, res) => {
-  const configs = Object.entries(dict).map(([key, value]) => {
-    const aircraft = Object.keys(value['out'] || {});
-    return {
-      query: key,
-      server: value['server'],
-      fc: value['fc'],
-      rx: [value['rxLat'], value['rxLon'], value['rxAlt']],
-      tx: [value['txLat'], value['txLon'], value['txAlt']],
-      aircraft_count: aircraft.length,
-      last_api_call: value['timestamp'],
-      sample_aircraft: aircraft.length > 0
-        ? { hex: aircraft[0], ...value['out'][aircraft[0]] }
-        : null
-    };
-  });
+  const status = runtimeManager.getStatus();
 
   res.json({
     uptime_seconds: Math.floor((Date.now() - startTime) / 1000),
-    active_configs: configs.length,
-    configs: configs
+    active_configs: status.active_configs,
+    configs: status.configs
   });
+});
+
+app.get('/api/configs', async (req, res) => {
+  return res.json(await listConfigs());
+});
+
+app.post('/api/configs', async (req, res) => {
+  const config = parseStoredConfigInput(req.body);
+  if (!config) {
+    return res.status(400).json({error: 'Invalid config payload.'});
+  }
+
+  return res.status(201).json(await createConfig(config));
+});
+
+app.get('/api/configs/:id', async (req, res) => {
+  const config = await getConfig(req.params.id);
+  if (!config) {
+    return res.status(404).json({error: 'Config not found.'});
+  }
+
+  return res.json(config);
+});
+
+app.put('/api/configs/:id', async (req, res) => {
+  const existing = await getConfig(req.params.id);
+  if (!existing) {
+    return res.status(404).json({error: 'Config not found.'});
+  }
+
+  const nextConfig = parseStoredConfigInput({...existing, ...req.body});
+  if (!nextConfig) {
+    return res.status(400).json({error: 'Invalid config payload.'});
+  }
+
+  return res.json(await updateConfig(req.params.id, nextConfig));
+});
+
+app.delete('/api/configs/:id', async (req, res) => {
+  const deleted = await deleteConfig(req.params.id);
+  runtimeManager.stopStoredConfig(req.params.id);
+  if (!deleted) {
+    return res.status(404).json({error: 'Config not found.'});
+  }
+
+  return res.status(204).end();
+});
+
+app.post('/api/configs/:id/start', async (req, res) => {
+  const config = await getConfig(req.params.id);
+  if (!config) {
+    return res.status(404).json({error: 'Config not found.'});
+  }
+
+  const result = await runtimeManager.startStoredConfig(config);
+  if (!result.ok) {
+    return res.status(result.status).json(result.body);
+  }
+
+  return res.json({
+    config_id: config.id,
+    status: 'running'
+  });
+});
+
+app.post('/api/configs/:id/stop', async (req, res) => {
+  const config = await getConfig(req.params.id);
+  if (!config) {
+    return res.status(404).json({error: 'Config not found.'});
+  }
+
+  runtimeManager.stopStoredConfig(config.id);
+  return res.json({
+    config_id: config.id,
+    status: 'idle'
+  });
+});
+
+app.get('/api/configs/:id/runtime', async (req, res) => {
+  const config = await getConfig(req.params.id);
+  if (!config) {
+    return res.status(404).json({error: 'Config not found.'});
+  }
+
+  const runtime = runtimeManager.getRuntimeByConfigId(config.id);
+  if (!runtime) {
+    return res.json({
+      config_id: config.id,
+      status: 'idle',
+      last_fetch_at: null,
+      last_process_at: null,
+      warm_samples_ready: false,
+      aircraft_count: 0,
+      doppler_ready_count: 0,
+      last_error: null
+    });
+  }
+
+  return res.json(runtime);
+});
+
+app.get('/api/configs/:id/output', async (req, res) => {
+  const config = await getConfig(req.params.id);
+  if (!config) {
+    return res.status(404).json({error: 'Config not found.'});
+  }
+
+  return res.json(runtimeManager.getOutputByConfigId(config.id) ?? {});
+});
+
+app.get('/', (req, res) => {
+  return res.sendFile(path.join(uiDir, 'index.html'));
 });
 
 app.listen(port, '::', () => {
   console.log(`Server is running on port ${port}`);
 });
 
-/// @brief Main event loop to update dict data.
-/// @details Loops over each request URL and updates dict data.
-/// This means multiple geometries/frequencies/servers can be used simultaneously.
-/// Removes dict entry if API not called for some time.
-/// Recursive setTimeout call ensures no function overlapping.
-/// @return Void.
-const process_adsb2dd = async () => {
-
-  // loop over dict entries
-  for (const [key, value] of Object.entries(dict)) {
-
-    // get latest JSON from server
-    var json = await getTar1090(dict[key]['apiUrl']);
-
-    // check that ADS-B data has updated
-    if (json.now === dict[key]['timestamp']) {
-      continue;
-    }
-
-    // core processing
-    adsb2dd(key, json);
-
-    // remove key after inactivity
-    if (Date.now()/1000-dict[key]['out']['timestamp'] > tDelete) {
-      delete(dict[key]);
-    }
-
-  }
-
-  setTimeout(process_adsb2dd, tUpdate);
-};
-setTimeout(process_adsb2dd, tUpdate);
-
-
-/// @brief Convert ADS-B coordinates to delay-Doppler coordinates.
-/// @details Implements core functionality of this program.
-/// Compute bistatic delay and Doppler using rx/tx locations.
-/// Apply coefficient to convert m/s to Hz.
-/// @param key Current key in dict (API endpoint).
-/// @param json Current JSON from tar1090 server.
-function adsb2dd(key, json) {
-
-  // remove aircraft if no recent updates
-  for (const aircraft in dict[key]['out']) {
-    if (Date.now()/1000 - dict[key]['out'][aircraft]['timestamp'] > tDeletePlane) {
-      delete(dict[key]['out'][aircraft]);
-      delete(dict[key]['proc'][aircraft]);
-    }
-  }
-
-  // loop over aircraft from JSON
-  for (const aircraft of json.aircraft) {
-
-    // only consider aircraft with lat/lon/alt/flight
-    if (isValidNumber(aircraft['lat']) && isValidNumber(aircraft['lon']) && 
-      isValidNumber(aircraft['alt_geom'] && (aircraft['flight'] != undefined))) {
-
-      // add new entry
-      const hexCode = aircraft.hex;
-      if (!(hexCode in dict[key]['out'])) {
-        dict[key]['out'][hexCode] = {};
-        dict[key]['proc'][hexCode] = {};
-        dict[key]['proc'][hexCode]['delays'] = [];
-        dict[key]['proc'][hexCode]['timestamps'] = [];
-      }
-
-      // skip if no change to lat/lon/alt
-      if (dict[key]['out'][hexCode]['lat'] === aircraft['lat'] &&
-        dict[key]['out'][hexCode]['lon'] === aircraft['lon'] &&
-        dict[key]['out'][hexCode]['alt'] === aircraft['alt_geom']) {
-        continue;
-      }
-
-      dict[key]['out'][hexCode]['timestamp'] = json.now + aircraft.seen_pos;
-      dict[key]['out'][hexCode]['flight'] = (aircraft.flight);
-      dict[key]['proc'][hexCode]['lat'] = aircraft['lat'];
-      dict[key]['proc'][hexCode]['lon'] = aircraft['lon'];
-      dict[key]['proc'][hexCode]['alt'] = aircraft['alt_geom'];
-
-      // convert target to ECEF
-      const tar = lla2ecef(aircraft['lat'], aircraft['lon'], ft2m(aircraft['alt_geom']));
-
-      // bistatic delay (km)
-      const dRxTar = norm([dict[key]['ecefRx'].x-tar.x,
-        dict[key]['ecefRx'].y-tar.y,
-	dict[key]['ecefRx'].z-tar.z]);
-      const dTxTar = norm([dict[key]['ecefTx'].x-tar.x,
-        dict[key]['ecefTx'].y-tar.y,
-	dict[key]['ecefTx'].z-tar.z]);
-      const delay = dRxTar + dTxTar - dict[key]['dRxTx'];
-
-      // store bistatic delay/timestamps for Doppler
-      dict[key]['proc'][hexCode]['delays'].push(delay);
-      dict[key]['proc'][hexCode]['timestamps'].push(json.now + aircraft.seen_pos);
-
-      // bistatic Doppler (Hz)
-      if (dict[key]['proc'][hexCode]['delays'].length >= 2) {
-
-	// smoothed derivative using median method
-	const doppler_ms_arr = smoothedDerivativeUsingMedian(
-	  dict[key]['proc'][hexCode]['delays'], 
-	  dict[key]['proc'][hexCode]['timestamps'], nDopplerSmooth);
-	const doppler_ms = doppler_ms_arr.at(-1);
-
-	// standard derivative (noisy)
-	/*
-	const delta_t = dict[key]['proc'][hexCode]['timestamps'].at(-1)
-          - dict[key]['proc'][hexCode]['timestamps'].at(-2);
-	const diff = dict[key]['proc'][hexCode]['delays'].at(-1)
-	  - dict[key]['proc'][hexCode]['delays'].at(-2);
-        const doppler_ms = diff / delta_t;
-	*/
-
-	// convert Doppler to Hz
-        const doppler = -doppler_ms/(1*(299792458/(dict[key]['fc']*1000000)));
-
-	// output data
-	dict[key]['out'][hexCode]['delay'] = limit_digits(delay/1000, 5)
-        dict[key]['out'][hexCode]['doppler'] = limit_digits(doppler, 5)
-
-	// limit max number of storage
-        if (dict[key]['proc'][hexCode]['delays'].length >= nMaxDelayArray) {
-	  dict[key]['proc'][hexCode]['delays'].shift();
-	  dict[key]['proc'][hexCode]['timestamps'].shift();
-	}
-      }
-
-    }
-
-  }
-  
-}
-
-
-function limit_digits(number, digits) {
-  if (Number.isInteger(number)) {
-    return number;
-  } else {
-    return number.toFixed(digits);
-  }
-}
-
-/// @brief Computes a smoothed derivative of delays with respect to timestamps. 
-/// @details Using a moving median method on the last k samples. 
-/// If fewer than k samples are given for delays and timestamps, it will use all available samples.
-/// Just a hunch and probably not optimum.
-/// @param delays Array to diff.
-/// @param timestamps Array to diff with respect to.
-/// @param k Maximum number of samples to compute median on.
-/// @return Array containing a smoothed derivative.
-function smoothedDerivativeUsingMedian(delays, timestamps, k) {
-  if (delays.length !== timestamps.length || delays.length < 2 || k < 2) {
-    throw new Error('Invalid input data for computing the derivative.');
-  }
-
-  const result = [];
-
-  for (let i = 0; i < delays.length; i++) {
-    const startIdx = Math.max(0, i - k + 1);
-    const endIdx = i + 1;
-
-    const lastKDelays = delays.slice(startIdx, endIdx);
-    const lastKTimestamps = timestamps.slice(startIdx, endIdx);
-
-    const deltaDelays = lastKDelays.map((delay, idx) => {
-      if (idx > 0) {
-        const deltaTime = lastKTimestamps[idx] - lastKTimestamps[idx - 1];
-        return (delay - lastKDelays[idx - 1]) / deltaTime;
-      }
-      return 0; // If it's the first element, set the derivative to 0.
-    });
-
-    // calculate the moving median of the delta delays
-    const movingMedianDerivative = calculateMovingMedian(deltaDelays);
-
-    result.push(movingMedianDerivative);
-  }
-
-  return result;
-}
-
-/// @brief Helper function to calculate the moving median of an array
-/// @param arr Array to calculate moving median on.
-/// @return Array of moving median.
-function calculateMovingMedian(arr) {
-  const sortedArr = [...arr].sort((a, b) => a - b);
-  const middle = Math.floor(sortedArr.length / 2);
-
-  if (sortedArr.length % 2 === 0) {
-    return (sortedArr[middle - 1] + sortedArr[middle]) / 2;
-  } else {
-    return sortedArr[middle];
-  }
-}
+runtimeManager.schedule();
 
 process.on('SIGTERM', () => {
   console.log('SIGTERM signal received.');

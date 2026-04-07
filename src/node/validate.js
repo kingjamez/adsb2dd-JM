@@ -2,6 +2,5 @@
 /// @param value Value to check.
 /// @return True is value is valid.
 export function isValidNumber(value) {
-  return !isNaN(value);
+  return value !== null && value !== '' && Number.isFinite(Number(value));
 }
-

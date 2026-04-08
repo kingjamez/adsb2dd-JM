@@ -6,6 +6,7 @@ import {
   parseConfigFromQuery,
   runtimeConfigFromStoredConfig
 } from '../core/config.js';
+import {buildRecorderSnapshot} from '../core/labels.js';
 import {isValidTar1090Payload, processAircraftFrame} from '../core/engine.js';
 
 const defaultOptions = {
@@ -113,9 +114,10 @@ export function createRuntimeManager(customOptions = {}) {
       status: state.lastError ? 'error' : state.lastProcessAt ? 'running' : 'warming',
       last_fetch_at: state.lastSourceNow,
       last_process_at: state.lastProcessAt,
-      warm_samples_ready: aircraft.some((hex) => state.out[hex].doppler !== undefined),
+      warm_samples_ready: aircraft.some((hex) => state.out[hex].doppler_status === 'ready'),
       aircraft_count: aircraft.length,
-      doppler_ready_count: aircraft.filter((hex) => state.out[hex].doppler !== undefined).length,
+      doppler_ready_count: aircraft.filter((hex) => state.out[hex].doppler_status === 'ready').length,
+      training_label_ready_count: aircraft.filter((hex) => state.out[hex].training_label_ready === true).length,
       last_error: state.lastError
     };
   }
@@ -123,6 +125,11 @@ export function createRuntimeManager(customOptions = {}) {
   function getOutputByConfigId(configId) {
     const state = getStateByConfigId(configId);
     return state ? state.out : null;
+  }
+
+  function getLabelsByConfigId(configId) {
+    const state = getStateByConfigId(configId);
+    return state ? buildRecorderSnapshot(state) : null;
   }
 
   function getStatus() {
@@ -135,7 +142,8 @@ export function createRuntimeManager(customOptions = {}) {
         rx: [value.rxLat, value.rxLon, value.rxAlt],
         tx: [value.txLat, value.txLon, value.txAlt],
         aircraft_count: aircraft.length,
-        doppler_ready_count: aircraft.filter((hex) => value.out[hex].doppler !== undefined).length,
+        doppler_ready_count: aircraft.filter((hex) => value.out[hex].doppler_status === 'ready').length,
+        training_label_ready_count: aircraft.filter((hex) => value.out[hex].training_label_ready === true).length,
         last_api_call: value.lastApiCall,
         last_source_now: value.lastSourceNow,
         last_process_at: value.lastProcessAt,
@@ -192,6 +200,7 @@ export function createRuntimeManager(customOptions = {}) {
     stopStoredConfig,
     getRuntimeByConfigId,
     getOutputByConfigId,
+    getLabelsByConfigId,
     getStatus,
     schedule
   };

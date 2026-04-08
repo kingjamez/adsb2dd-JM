@@ -2,7 +2,8 @@ import express from 'express';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 
-import {parseStoredConfigInput} from './core/config.js';
+import {parseStoredConfigInput, runtimeConfigFromStoredConfig} from './core/config.js';
+import {buildRecorderSnapshot} from './core/labels.js';
 import {createRuntimeManager} from './runtime/manager.js';
 import {
   createConfig,
@@ -44,6 +45,17 @@ app.get('/api/dd', async (req, res) => {
   }
 
   return res.json(result.state.out);
+});
+
+app.get('/api/labels', async (req, res) => {
+  console.log(req.originalUrl);
+
+  const result = await runtimeManager.ensureConfig(req.query);
+  if (!result.ok) {
+    return res.status(result.status).json(result.body);
+  }
+
+  return res.json(buildRecorderSnapshot(result.state));
 });
 
 app.get('/api/status', (req, res) => {
@@ -148,6 +160,7 @@ app.get('/api/configs/:id/runtime', async (req, res) => {
       warm_samples_ready: false,
       aircraft_count: 0,
       doppler_ready_count: 0,
+      training_label_ready_count: 0,
       last_error: null
     });
   }
@@ -162,6 +175,49 @@ app.get('/api/configs/:id/output', async (req, res) => {
   }
 
   return res.json(runtimeManager.getOutputByConfigId(config.id) ?? {});
+});
+
+app.get('/api/configs/:id/labels', async (req, res) => {
+  const config = await getConfig(req.params.id);
+  if (!config) {
+    return res.status(404).json({error: 'Config not found.'});
+  }
+
+  const labels = runtimeManager.getLabelsByConfigId(config.id);
+  if (labels) {
+    return res.json(labels);
+  }
+
+  const runtimeConfig = runtimeConfigFromStoredConfig(config);
+  return res.json({
+    schema_version: 1,
+    generated_at: Date.now()/1000,
+    source_frame_time: null,
+    last_process_at: null,
+    truth_time_basis: 'Per-aircraft source_position_time = aircraft.json now - seen_pos.',
+    config: runtimeConfig ? {
+      server: runtimeConfig.server,
+      fc_mhz: runtimeConfig.fc,
+      rx: {
+        latitude: runtimeConfig.rx[0],
+        longitude: runtimeConfig.rx[1],
+        altitude_m: runtimeConfig.rx[2]
+      },
+      tx: {
+        latitude: runtimeConfig.tx[0],
+        longitude: runtimeConfig.tx[1],
+        altitude_m: runtimeConfig.tx[2]
+      }
+    } : null,
+    label_stats: {
+      track_count: 0,
+      training_label_ready_count: 0,
+      gold_count: 0,
+      silver_count: 0,
+      reject_count: 0
+    },
+    labels: []
+  });
 });
 
 app.get('/', (req, res) => {

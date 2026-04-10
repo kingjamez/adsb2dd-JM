@@ -10,8 +10,6 @@ export function lla2ecef(latitude, longitude, altitude) {
   // WGS84 ellipsoidal parameters
   const a = 6378137.0; // semi-major axis in meters
   const f = 1.0 / 298.257223563; // flattening
-  const b = (1.0 - f) * a; // semi-minor axis
-
   // Calculate the eccentricity squared
   const esq = 2.0 * f - f * f;
 

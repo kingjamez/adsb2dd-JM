@@ -1,4 +1,4 @@
-export function getDopplerReadiness(delays, timestamps, options) {
+function getDopplerReadiness(delays, timestamps, options) {
   const {minSamples, minWindowSeconds} = options;
 
   if (delays.length < minSamples || timestamps.length < minSamples) {
